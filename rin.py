@@ -55,23 +55,6 @@ class Rin:
             return False
 
     @classmethod
-    def isLastDate(self, date):
-        """ 月末か判定する
-
-        Args:
-            datetime
-        Returns:
-            True:月末の場合
-            False:上記以外
-        """
-
-        weeks, day = monthrange(date.year, date.month)
-        if (date.strftime('%d') == str(day)):
-            return True
-        else:
-            return False
-
-    @classmethod
     def getTodayInfo(self):
         """ 今日の予約のURLを取得する関数
 
@@ -79,12 +62,15 @@ class Rin:
             none
 
         Returns:
-            url(今日の予約URL)
+            day_info:
+                混雑状況
+            url:
+                今日の予約URL
         """
 
         # 予約ページからContent-Bodyを取得する
         response = urllib2.urlopen(Rin.response_url)
-        body = response.read()
+        body     = response.read()
 
         # HTML をパースする
         soup = BeautifulSoup(body, 'html.parser')
@@ -100,6 +86,19 @@ class Rin:
 
     @classmethod
     def getReserveInfo(self, url):
+        """予約ページを解析する
+
+        Args:
+            url:
+                予約ページのURL
+        Returns:
+            daily_condition:
+                予約状況
+            state_list:
+                予約状況一覧
+            dt_str:
+                予約対象ページの日
+        """
 
         date_integer = url.split('=')[1]
         dt           = datetime.fromtimestamp(int(date_integer))
@@ -113,14 +112,13 @@ class Rin:
 
         state_list = []
         if (len(div_day_calendar) == 0):
-            # day-calendarが存在しない場合、定休日とみなす
+            # ページ内にday-calendarが存在しない場合、定休日とみなす
             return (u'ー', state_list, dt_str)
 
-
-        dayly_condition = ''
+        daily_condition = ''
         pattern = r'\d\d:30'
         for cal in div_day_calendar:
-            dayly_condition = cal.find('p').text + u' の予約状況'
+            daily_condition = cal.find('p').text + u' の予約状況'
             tr_list = cal.find_all('tr')
             for tr in tr_list:
                 if (u'時間' == tr.find('th', {'class': 'day-left'}).text):
@@ -137,25 +135,55 @@ class Rin:
                 if (not state == u'－'):
                     state_list.append(u'{0} {1}'.format(time, state))
 
-        return (dayly_condition, state_list, dt_str)
+        return (daily_condition, state_list, dt_str)
 
     @classmethod
-    def getNextDayInteger(self, date):
-        d = date + timedelta(days=2)
-        s = '{0}{1}{2}'.format(d.year, d.month, d.day)
-        int_time = int(time.mktime(datetime.strptime(s, '%Y%m%d').timetuple()))
+    def getNextDayInteger(self, date, days):
+        """指定日付をInteger型で生成する
+
+        Args:
+            date:
+                ベースとなる日付
+            days:
+                進めたい日数(1日すすめる場合、2を指定)
+        Returns:
+            Integer型の時間
+        """
+        dt       = date + timedelta(days = days)
+        dts      = '{0}{1}{2}'.format(dt.year, dt.month, dt.day)
+        int_time = int(time.mktime(datetime.strptime(dts, '%Y%m%d').timetuple()))
         return int_time
 
     @classmethod
     def generateShortURL(self, url):
-        longUrl      = url
+        """ 短縮URLを生成する
+
+        Args:
+            url:
+                短縮したいURL
+        Returns:
+            短縮したURL
+        """
+        longUrl  = url
         base_url = 'https://api-ssl.bitly.com/v3/shorten?access_token=(Your bitly token)&longUrl='
         f = urllib2.urlopen(base_url + longUrl)
         return json.load(f)[u'data'][u'url']
 
     @classmethod
-    def createMessage(self, dayly_condition, list, url):
-        message = dayly_condition + '\n'
+    def createMessage(self, resrve_date, list, url):
+        """Tweetするメッセージを生成する
+
+        Args:
+            resrve_date:
+                予約日時
+            list:
+                時間毎の状況
+            url:
+                予約ページのURL
+        Returns:
+            生成したメッセージ
+        """
+        message = resrve_date + '\n'
         for item in list:
             message += item + '\n'
         message += url + ' \n'
@@ -164,6 +192,14 @@ class Rin:
 
     @classmethod
     def twitterPost(self, message):
+        """TwitterにPostする
+
+        Args:
+            message:
+                Tweetするメッセージ
+        Returns:
+            none
+        """
 
         tweet_url = 'https://api.twitter.com/1.1/statuses/update.json'
         auth = OAuth1(Rin.consumer_key,
@@ -173,38 +209,42 @@ class Rin:
         params = {'status': message}
         res = req.post(tweet_url, params = params, auth = auth)
 
-# 現在時刻の取得
+# 現在時刻の取得(日本時間)
 date = datetime.now(tz=JST())
 
 message = ''
 if (Rin.isCloseBusiness(date)):
     # 営業時間内の場合
+
     day_info, url = Rin.getTodayInfo()
-    if ((day_info == u"○") or (day_info == u"△") or (day_info == u"×")):
-        (dayly_condition, list, dt_str) = Rin.getReserveInfo(url)
-        if (dayly_condition == u'ー'):
+    if ((day_info == u'○') or (day_info == u'△') or (day_info == u'×')):
+        # 営業日の場合
+
+        (daily_condition, list, dt_str) = Rin.getReserveInfo(url)
+        if (daily_condition == u'ー'):
             # 営業時間内は手前で除外されているため、ここには入らないはず
 
             message = u'{0}は定休日です'.format(dt_str)
         else:
-            url = Rin.generateShortURL(url)
-            message = Rin.createMessage(dayly_condition, list, url)
+            url     = Rin.generateShortURL(url)
+            message = Rin.createMessage(daily_condition, list, url)
     else:
-        # 同一メッセージは連続して投げれない
+        # 同一メッセージは連続して投げれない(Twitter仕様)
         message = u'本日は定休日です'
 else:
     # 営業時間外の場合
-    if (not Rin.isLastDate(date)):
-        # 月末ではない場合
-        nextdate_int = Rin.getNextDayInteger(date)
-        url = Rin.response_url + Rin.next_manth_uri + str(nextdate_int)
-        url = Rin.generateShortURL(url)
-        (dayly_condition, list) = Rin.getReserveInfo(url)
-        if (dayly_condition == u'ー'):
-            message = u'{0}は定休日です'.format(dt_str)
-        else:
-            message = Rin.createMessage(dayly_condition, list, url)
+
+    # 予約のページ表示パラメータ用の日付(integer)生成
+    nextdate_int = Rin.getNextDayInteger(date, 2)
+    # 予約ページの生成
+    url       = Rin.response_url + Rin.next_manth_uri + str(nextdate_int)
+    # 短縮URLの生成
+    short_url = Rin.generateShortURL(url)
+    (daily_condition, list, dt_str) = Rin.getReserveInfo(url)
+    if (daily_condition == u'ー'):
+        message = u'{0}は定休日です'.format(dt_str)
+    else:
+        message = Rin.createMessage(daily_condition, list, short_url)
 
 # Twitterにポストする
 Rin.twitterPost(message)
-
