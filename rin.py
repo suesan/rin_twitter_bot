@@ -31,11 +31,14 @@ class Rin:
     response_url    = base_url + urllib2.quote(reservation_uri)
     next_manth_uri  = '?ymd='
     next_url        = ''
+    is_holiday      = 0;
+    is_reserve      = 0;
 
     consumer_key        = 'Twitter consumer keyをいれる'
     consumer_secret     = 'Twitter consumer secret keyをいれる'
     access_token_key    = 'Twitter access token keyをいれる'
     access_token_secret = 'Twitter access token secret keyを入れる'
+    tag                 = u'#凛 #Rin #治療院'
 
     @classmethod
     def isCloseBusiness(self, date):
@@ -113,6 +116,7 @@ class Rin:
         state_list = []
         if (len(div_day_calendar) == 0):
             # ページ内にday-calendarが存在しない場合、定休日とみなす
+            Rin.is_holiday = 1
             return (u'ー', state_list, dt_str)
 
         daily_condition = ''
@@ -124,14 +128,21 @@ class Rin:
                 if (u'時間' == tr.find('th', {'class': 'day-left'}).text):
                     continue
 
+                # 時間を取得する
                 time = tr.find('th', {'class': 'day-left'}).text
                 try:
                     if (re.match(pattern, str(time))):
+                        # 30分は無視する
+
                         continue
                 except re.error:
                     pass
 
+                # 予約状況を取得する
                 state = tr.find('td', {'class': 'day-right'}).text
+                if (state == u'○'):
+                    Rin.is_reserve = 1
+
                 if (not state == u'－'):
                     state_list.append(u'{0} {1}'.format(time, state))
 
@@ -187,7 +198,7 @@ class Rin:
         for item in list:
             message += item + '\n'
         message += url + ' \n'
-        message += u'#凛 #Rin #治療院'
+        message += Rin.tag
         return message
 
     @classmethod
@@ -221,28 +232,35 @@ if (Rin.isCloseBusiness(date)):
         # 営業日の場合
 
         (daily_condition, list, dt_str) = Rin.getReserveInfo(url)
-        if (daily_condition == u'ー'):
-            # 営業時間内は手前で除外されているため、ここには入らないはず
+        if (Rin.is_reserve == 0):
+            # 受付終了の場合
 
-            message = u'{0}は定休日です'.format(dt_str)
+            message = u'本日の予約受付は終了しました\nありがとうございました\n{0}\n{1}'.format(Rin.generateShortURL(Rin.base_url), Rin.tag)
         else:
-            url     = Rin.generateShortURL(url)
-            message = Rin.createMessage(daily_condition, list, url)
+            if (daily_condition == u'ー'):
+                # 営業時間内は手前で除外されているため、ここには入らないはず
+
+                message = u'{0}は定休日です\n{1}\n{2}'.format(dt_str, Rin.generateShortURL(Rin.base_url), Rin.tag)
+            else:
+                url     = Rin.generateShortURL(url)
+                message = Rin.createMessage(daily_condition, list, url)
     else:
         # 同一メッセージは連続して投げれない(Twitter仕様)
-        message = u'本日は定休日です'
+
+        message = u'本日は定休日です\n{0}\n{1}'.format(Rin.generateShortURL(Rin.base_url), Rin.tag)
+
 else:
     # 営業時間外の場合
 
     # 予約のページ表示パラメータ用の日付(integer)生成
     nextdate_int = Rin.getNextDayInteger(date, 2)
     # 予約ページの生成
-    url       = Rin.response_url + Rin.next_manth_uri + str(nextdate_int)
+    url = Rin.response_url + Rin.next_manth_uri + str(nextdate_int)
     # 短縮URLの生成
     short_url = Rin.generateShortURL(url)
     (daily_condition, list, dt_str) = Rin.getReserveInfo(url)
     if (daily_condition == u'ー'):
-        message = u'{0}は定休日です'.format(dt_str)
+        message = u'{0}は定休日です\n{1}\n{2}'.format(dt_str, Rin.generateShortURL(Rin.base_url), Rin.tag)
     else:
         message = Rin.createMessage(daily_condition, list, short_url)
 
