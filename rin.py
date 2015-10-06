@@ -5,6 +5,7 @@ except ImportError:
     import urllib2
 import json
 import locale
+import random
 import re
 import requests as req
 import time
@@ -31,6 +32,7 @@ class TwitterClass():
     consumer_secret     = ''
     access_token        = ''
     access_token_secret = ''
+    auth = None
 
     """docstring for """
     def __init__(self, consumer_key, consumer_secret, access_token, access_token_secret):
@@ -39,32 +41,19 @@ class TwitterClass():
         self.consumer_secret     = consumer_secret
         self.access_token        = access_token
         self.access_token_secret = access_token_secret
-
-    def create_oath_session(slef):
-        auth = OAuth1(
+        self.auth = OAuth1(
             self.consumer_key,
-            client_secret = self.consumer_secret,
-            resource_owner_key = self.access_token,
+            client_secret         = self.consumer_secret,
+            resource_owner_key    = self.access_token,
             resource_owner_secret = self.access_token_secret
         )
-        return auth
-
 
     def twitter_update(self, message):
         url = u'https://api.twitter.com/1.1/statuses/update.json'
         data = {
             'status': message
         }
-
-        auth = self.create_oath_session
-
-        auth = OAuth1(
-            self.consumer_key,
-            client_secret = self.consumer_secret,
-            resource_owner_key = self.access_token,
-            resource_owner_secret = self.access_token_secret
-        )
-        response = req.post(url, data=data, auth=auth)
+        response = req.post(url, data=data, auth=self.auth)
         if response.status_code != 200:
             print(u'Error code: %d' %(response.status_code))
         print(json.loads(response.text))
@@ -73,14 +62,12 @@ class BitlyClass(object):
     """docstring for """
     def shorten(self, target_url):
         self.url          = u'https://api-ssl.bitly.com/v3/shorten?access_token='
-        self.bity_api_key = u'856862b28916159dc203d6526254b3228a60453c'
+        self.bity_api_key = u'ビットリーAPIキー'
         self.target_url   = target_url
         self.long_url     = u'&longUrl='
         self.api_shorten  = self.url + self.bity_api_key + self.long_url + self.target_url
         response = urllib2.urlopen(self.api_shorten)
         return json.load(response)[u'data'][u'url']
-
-
 
 class RinClass(object):
     def __init__(self):
@@ -92,6 +79,8 @@ class RinClass(object):
         self.is_holiday      = 0;
         self.is_reserve      = 0; # 0 : 空き時間なし / 1：空き時間あり
         self.tag             = u'#凛 #治療院 '
+        self.tags            = [u'#凛', u'#治療院', u'#小平', u'#東村山市', u'#小平駅南口', u'#徒歩３分', u'#鍼灸', u'#健康', u'#肩こり']
+        self.BodyCare_Rin    = u'@BodyCare_Rin'
 
     def isCloseBusiness(self, date):
         """ 営業時間に間に合うか判定する(18時30分)
@@ -131,6 +120,11 @@ class RinClass(object):
 
         # classにtodayが入っているものを今日の予約日と判断する
         td_today = soup.find('td', {'class': re.compile('today')})
+        # calendar-markの値が－だったら、休暇日
+        day_info = td_today.find('div', {'class': re.compile('calendar-mark')})
+        if (u"－" == day_info.text):
+            return (day_info, None)
+
         # <a>タグを取り出す
         today_link = td_today.a
         today_url  = today_link['href']
@@ -259,13 +253,17 @@ if __name__ == '__main__':
                 if (daily_condition == u'ー'):
                     # 営業時間内は手前で除外されているため、ここには入らないはず
 
-                    message = u'{0}は定休日です\n{1}\n{2}'.format(dt_str, bitly.shorten(rin.base_url), rin.tag)
+                    message = u'{0}は定休日です\n{1}\n{2}'.format(dt_str, bitly.shorten(rin.url), rin.tag)
                 else:
                     url = bitly.shorten(url)
                     message = rin.createMessage(daily_condition, list, url)
         else:
+
+            random.shuffle(rin.tags)
+            tag = u'{0} {1} {2}'.format(rin.tags[0], rin.tags[1], rin.tags[2])
+
             # 同一メッセージは連続して投げれない(Twittershot仕様)
-            message = u'本日は定休日です\n{0}\n{1}'.format(bitly.shorten(rin.base_url), rin.tag)
+            message = u'本日は定休日です\n{0}\n{1}'.format(bitly.shorten(rin.url), tag)
     else:
         # 営業時間外の場合
 
@@ -277,15 +275,14 @@ if __name__ == '__main__':
             short_url = bitly.shorten(url)
             (daily_condition, list, dt_str) = rin.getReserveInfo(url)
             if (daily_condition == u'ー'):
-                message = u'{0}は定休日です\n{1}\n{2}'.format(dt_str, Bitly.shorten(Rin.base_url), Rin.tag)
+                message = u'{0}は定休日です\n{1}\n{2}'.format(dt_str, bitly.shorten(rin.url), rin.tag)
             else:
                 message = rin.createMessage(daily_condition, list, short_url)
 
-
     tw = TwitterClass(
-        u'yl36YGDMtl33AiTIqutK9KvuZ',
-        u'sgRMLYjPyAfMxwkfU3GCErbnWxNet4iBZFKfreNlSpONzvGh0S',
-        u'87971590-jQj49PsYLty3diYSMckc1Opcu3Qhny8GuuxHwahgs',
-        u'Du5BRESeBqXbYdBoL3Mw9v7Ho2kJVd8Khzwzi9BOtPoLs'
+        u'consumer_key',
+        u'consumer_secret',
+        u'access_token',
+        u'access_token_secret'
     )
     tw.twitter_update(message)
